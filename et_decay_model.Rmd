@@ -1,0 +1,202 @@
+---
+title: "ET decay model"
+author: "Beni Stocker"
+date: "4/26/2019"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+```
+
+## Linear model
+
+Assume a 60-days dry down event with the following setup:
+
+- The initial water available to plants across the rooting zone, $S_0$ is 100 mm.
+- ET (termed $T$, since it's only transpiration here) is a linear function of the remaining water stored $S_t$ and is independent of VPD.
+$$
+T = \alpha S
+$$
+- The change in plant-available water storage is $\Delta S=T$.
+
+This leads to an exponential decay of both $S$ and $D$ with time. We can set $\alpha = 0.01$ d $^{-1}$.
+```{r}
+s0 <- 100
+alpha <- 0.01
+ntsteps <- 500
+s_t <- rep(NA, ntsteps)
+t_t <- rep(NA, ntsteps)
+s_t[1] <- s0 
+for (idx in 1:(ntsteps-1)){
+  t_t[idx] <- alpha * s_t[idx]
+  s_t[idx + 1] <- s_t[idx] - t_t[idx]
+}
+df_lin <- tibble( time = 1:ntsteps, soilm = s_t, transp = t_t ) 
+df_lin %>% 
+  ggplot(aes(time, soilm)) + 
+  geom_line()
+
+df_lin %>% 
+  tidyr::drop_na() %>% 
+  ggplot(aes(time, transp)) + 
+  geom_line()
+
+df_lin %>% 
+  tidyr::drop_na() %>% 
+  ggplot(aes(100-soilm, transp)) + 
+  labs(x=expression(integral(ET))) +
+  geom_line()
+```
+
+The question is: How does VPD affect the ET decline?
+
+## VPD-enabled model, linear
+
+We can formulate a model for $T$ as a function of VPD (termed $D$) and canopy conductance $G_s$.
+$$
+T = G_s D
+$$
+$G_s$ itself is a function of the remaining soil water content $S$. We can assume a linear model with $G_s = 0$ for $S = 0$:
+$$
+G_s = \beta S
+$$
+To get comparable numbers to the example above, let's assume that under under well-watered conditions ($S = 100$ mm) and a VPD of 1000 Pa, we should have a transpiration of 1 mm d$^{-1}$. Hence, we $\beta = 10^{-5}$.
+$$
+T = \beta S D
+$$
+
+How does $T$ evolve under constant $D$?
+```{r}
+s0 <- 100
+beta <- 1e-5
+ntsteps <- 500
+d_t <- rep(1000, ntsteps)
+s_t <- rep(NA, ntsteps)
+t_t <- rep(NA, ntsteps)
+s_t[1] <- s0
+for (idx in 1:(ntsteps-1)){
+  t_t[idx] <- beta * s_t[idx] * d_t[idx]
+  s_t[idx + 1] <- s_t[idx] - t_t[idx]
+}
+df_vpd <- tibble( time = 1:ntsteps, soilm_vpd_const = s_t, transp_vpd_const = t_t ) 
+df_vpd %>% 
+  ggplot(aes(time, soilm_vpd_const)) + 
+  geom_line()
+
+df_vpd %>% 
+  tidyr::drop_na() %>% 
+  ggplot(aes(time, transp_vpd_const)) + 
+  geom_line()
+```
+
+Ok. That's the same. As expected because transpiration is effectively just a function of the $S$, equivalent to the linear model above. 
+
+But what happens when $D$ changes over time? Let's assume a linear increase from 1000 Pa to 4000 Pa.
+```{r}
+s0 <- 100
+beta <- 1e-5
+ntsteps <- 500
+d_t <- rep(NA, ntsteps)
+d_t[1] <- 1000
+d_t[ntsteps] <- 4000
+d_t <- approx(1:ntsteps, d_t, xout=1:ntsteps)$y
+s_t <- rep(NA, ntsteps)
+t_t <- rep(NA, ntsteps)
+s_t[1] <- s0
+for (idx in 1:(ntsteps-1)){
+  t_t[idx] <- beta * s_t[idx] * d_t[idx]
+  s_t[idx + 1] <- s_t[idx] - t_t[idx]
+}
+df_vpd <- tibble( time = 1:ntsteps, soilm_vpd_lin = s_t, transp_vpd_lin = t_t ) %>% left_join(df_vpd, by="time")
+df_vpd %>% 
+  ggplot(aes(time)) + 
+  geom_line(aes(y=soilm_vpd_const, color="soilm_vpd_const"), linetype="dashed") +
+  geom_line(aes(y=soilm_vpd_lin, color="soilm_vpd_lin"))
+
+df_vpd %>% 
+  ggplot(aes(time)) + 
+  geom_line(aes(y=transp_vpd_const, color="transp_vpd_const"), linetype="dashed") +
+  geom_line(aes(y=transp_vpd_lin, color="transp_vpd_lin"))
+```
+
+Hmmm. That's not the same.
+
+## VPD-enabled model, sigmoidal
+
+### Constant VPD
+
+Instead of a linear response of $G_s$ to $S$, we can assume a sigmoidal response that looks (somewhat more realistically) like this:
+```{r}
+sigm <- function(x){0.001/(1+exp(-(x/5-5)))}
+df_sigm <- tibble(soilm=0:100) %>% 
+  rowwise() %>% 
+  mutate(gs = sigm(soilm))
+df_sigm %>% 
+  ggplot(aes(soilm, gs)) +
+  geom_line()
+```
+
+Now, let's look at the evolution of soil moisture and transpiration during dry-down events. First, with constant VPD.
+```{r}
+beta <- 1e-5
+ntsteps <- 500
+d_t <- rep(1000, ntsteps)
+s_t <- rep(NA, ntsteps)
+t_t <- rep(NA, ntsteps)
+s_t[1] <- s0
+for (idx in 1:(ntsteps-1)){
+  t_t[idx] <- sigm(s_t[idx]) * d_t[idx]
+  s_t[idx + 1] <- s_t[idx] - t_t[idx]
+}
+df_vpd <- tibble( time = 1:ntsteps, soilm_vpd_const_sigm = s_t, transp_vpd_const_sigm = t_t ) %>% left_join(df_vpd, by="time")
+df_vpd %>% 
+  ggplot(aes(time)) + 
+  geom_line(aes(y=soilm_vpd_const, color="soilm_vpd_const"), linetype="dashed") +
+  geom_line(aes(y=soilm_vpd_const_sigm, color="soilm_vpd_const_sigm"))
+
+df_vpd %>% 
+  ggplot(aes(time)) + 
+  geom_line(aes(y=transp_vpd_const, color="transp_vpd_const"), linetype="dashed") +
+  geom_line(aes(y=transp_vpd_const_sigm, color="transp_vpd_const_sigm"))
+
+df_vpd %>% 
+  ggplot() + 
+  geom_line(aes(x=100-soilm_vpd_const, y=transp_vpd_const, color="transp_vpd_const"), linetype="dashed") +
+  geom_line(aes(x=100-soilm_vpd_const_sigm, y=transp_vpd_const_sigm, color="transp_vpd_const_sigm"))
+```
+
+### Increasing VPD
+
+```{r}
+beta <- 1e-5
+ntsteps <- 500
+d_t <- rep(NA, ntsteps)
+d_t[1] <- 1000
+d_t[ntsteps] <- 4000
+d_t <- approx(1:ntsteps, d_t, xout=1:ntsteps)$y
+s_t <- rep(NA, ntsteps)
+t_t <- rep(NA, ntsteps)
+s_t[1] <- s0
+for (idx in 1:(ntsteps-1)){
+  t_t[idx] <- sigm(s_t[idx]) * d_t[idx]
+  s_t[idx + 1] <- s_t[idx] - t_t[idx]
+}
+df_vpd <- tibble( time = 1:ntsteps, soilm_vpd_lin_sigm = s_t, transp_vpd_lin_sigm = t_t ) %>% left_join(df_vpd, by="time")
+df_vpd %>% 
+  ggplot(aes(time)) + 
+  geom_line(aes(y=soilm_vpd_const, color="soilm_vpd_const"), linetype="dashed") +
+  geom_line(aes(y=soilm_vpd_lin_sigm, color="soilm_vpd_lin_sigm"))
+
+df_vpd %>% 
+  ggplot(aes(time)) + 
+  geom_line(aes(y=transp_vpd_const, color="transp_vpd_const"), linetype="dashed") +
+  geom_line(aes(y=transp_vpd_lin_sigm, color="transp_vpd_lin_sigm"))
+```

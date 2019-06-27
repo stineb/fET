@@ -1,0 +1,200 @@
+---
+title: "Apparent cumulative deficit at FLUXNET sites"
+author: "Beni Stocker"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+source("./R/get_obs_bysite_fluxnet2015.R")
+```
+
+## Idea
+
+This derives the apparent cumulative water deficit, based on observed ET at FLUXNET sites. The extreme values with a return period of N years is derived as a measure for the magnitude of droughts to which vegetation is expected to be adapted to. 
+
+## Get ET data
+
+In order to do a gapfilling using variables that are known to determine fluxes, we select predictors that are commontly used for estimating potential evapotranspiration using the Penman-Monteith Equation. These are:
+
+- $R_n$ net radiation
+- $G$ ground heat flux (ignored)
+- $S$ sum of all storage fluxes (ignored)
+- $\rho$ air density (`air.density()`)
+
+  - air temperature
+  - atmospheric pressure
+
+- $D_a$ VPD
+- $G_\text{ah}$ aerodynamic conductance to heat transfer
+
+  - $G_\text{am}$ aerodynamic conductance (`aerodynamic.conductance()`)
+  
+    - air temperature
+    - pressure
+    - wind speed at measurement height $u(z_r)$
+    - Friction velocity $u_\ast$
+    - sensible heat flux $H$
+    - local parameters (not needed for the simplest form using `Rb_model = "Thom_1972"`)
+    
+      - instrument height $z_r$
+      - canopy height $z_h$
+      - zero-plane displacement height $d$
+      - roughness length for momentum $z_{0m}$
+      - characteristic leaf dimension $D1$
+      
+  - $R_\text{bh}$ canopy boundary layer resistance
+  
+    - Friction velocity $u_\ast$
+
+- $s$ slope of the saturation vapor pressure curve (`Esat.slope()`)
+
+  - air temperature
+
+- $\gamma$ psychrometric constant (`psychrometric.constant()`)
+
+  - air temperature
+  - atmospheric pressure
+  
+- $G_\text{sw}$ Canopy conductance. Unknown, expected to respond to the following variables
+
+  - soil moisture
+  - PPFD
+  - VPD
+  
+More detailed formulations of the atmospheric conductance formulations account for LAI, leaf width. 
+
+### Daily data
+
+We use filtered daily data and conduct a filtering, similar as applied by the function `filter.data()` from the bigleaf package. 
+
+- Exclude rainy days for ET estimate
+- Low $u_\ast$
+
+In summary, we selected the following predictors to gapfill ET:
+
+- air temperature, day and night
+- atmospheric pressure
+- net radiation
+- sensible heat flux
+- wind speed
+- PPFD
+- VPD
+- friction velocity
+
+Read data from file
+```{r warning=FALSE}
+getvars <- c( 
+  "TA_F_NIGHT", 
+#  "TA_F_NIGHT_QC",  # DD: % measured or good qual gapfilled; HH: 0=measured, 1=good qual gapfill, 2=medium, 3=poor
+  "TA_F_DAY", # degC
+#  "TA_F_DAY_QC",  # DD: % measured or good qual gapfilled; HH: 0=measured, 1=good qual gapfill, 2=medium, 3=poor
+  "SW_IN_F", # W m-2
+#  "SW_IN_F_QC",  # DD: % measured or good qual gapfilled; HH: 0=measured, 1=good qual gapfill, 2=medium, 3=poor
+  "VPD_F", # hPa
+#  "VPD_F_QC",  # DD: % measured or good qual gapfilled; HH: 0=measured, 1=good qual gapfill, 2=medium, 3=poor
+  "PA_F", # kPa
+#  "PA_F_QC",  # DD: % measured or good qual gapfilled; HH: 0=measured, 1=good qual gapfill, 2=medium, 3=poor
+  "P_F",  # mm
+#  "P_F_QC",  # DD: % measured or good qual gapfilled; HH: 0=measured, 1=good qual gapfill, 2=medium, 3=poor
+  "WS_F",  # m s-1
+#  "WS_F_QC",  # DD: % measured or good qual gapfilled; HH: 0=measured, 1=good qual gapfill, 2=medium, 3=poor
+  "USTAR", # m s-1
+#  "USTAR_QC",  # DD: % measured or good qual gapfilled; HH: 0=measured, 1=good qual gapfill, 2=medium, 3=poor
+  "NETRAD", # W m-2
+#  "NETRAD_QC",  # DD: % measured or good qual gapfilled; HH: 0=measured, 1=good qual gapfill, 2=medium, 3=poor
+  "H_F_MDS", # W m-2 -> J m-2 d-1 or H_CORR (corrected by energy balance closure factor)?
+#  "H_F_MDS_QC",  # DD: % measured or good qual gapfilled; HH: 0=measured, 1=good qual gapfill, 2=medium, 3=poor
+  "LE_F_MDS"  # W m-2 -> J m-2 d-1
+#  "LE_F_MDS_QC"  # DD: % measured or good qual gapfilled; HH: 0=measured, 1=good qual gapfill, 2=medium, 3=poor
+  )
+
+ddf <- get_obs_bysite_fluxnet2015( 
+  sitename="AU-How", 
+  path_fluxnet2015="/alphadata01/bstocker/data/FLUXNET-2015_Tier1/20160128/point-scale_none_1d/original/unpacked/", 
+  timescale="d", 
+  getvars=getvars,
+  threshold_GPP=0, threshold_LE=0.5, threshold_H=0.5, threshold_SWC=1.0, threshold_WS=0.3, threshold_USTAR=0.5, threshold_T=0.5
+  ) 
+```
+
+Filter data using the `filter.data()` function from the bigleaf package.
+```{r eval=FALSE}
+ddf_clean <- bigleaf::filter.data(
+  data = ddf,
+  quality.control = TRUE,
+  vars.qc = c("temp_NIGHT", "temp_DAY", "swin", "vpd", "patm", "prec", "wspeed", "ustar", "netrad", "sensibleh", "latenth"),
+  quality.ext = "_QC",
+  good.quality = c(50,100),
+  missing.qc.as.bad = TRUE )
+```
+
+Plot some of the data that has just been loaded.
+```{r}
+ddf %>% 
+  ggplot(aes(date, latenth)) +
+  geom_line()
+
+ddf %>% 
+  ggplot(aes(date, sensibleh)) +
+  geom_line()
+
+ddf %>% 
+  ggplot(aes(date, wspeed)) +
+  geom_line()
+
+ddf %>% 
+  ggplot(aes(date, ustar)) +
+  geom_line()
+
+ddf %>% 
+  ggplot(aes(date, SWC_F_MDS_1)) +
+  geom_line()
+```
+
+
+## Gapfill data
+
+```{r}
+source("R/gapfill_nn.R")
+predictors <- names(ddf)
+predictors <- predictors[!(grepl("_QC", predictors))]
+predictors <- predictors[-which(predictors=="latenth" || predictors=="date")]
+
+ddf_gapfilled <- gapfill_nn(ddf, predictors = predictors, nam_target = "latenth", package = "caret")
+```
+
+Look at what was done.
+```{r}
+ggplot() +
+  geom_line(data=ddf_gapfilled, aes(date, latenth), color="blue") +
+  geom_line(data=ddf, aes(date, latenth), color="black")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
