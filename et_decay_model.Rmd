@@ -23,23 +23,26 @@ Assume a 60-days dry down event with the following setup:
 - The initial water available to plants across the rooting zone, $S_0$ is 100 mm.
 - ET (termed $T$, since it's only transpiration here) is a linear function of the remaining water stored $S_t$ and is independent of VPD.
 $$
-T = \alpha S
+T = \alpha S/S_0
 $$
 - The change in plant-available water storage is $\Delta S=T$.
 
 This leads to an exponential decay of both $S$ and $D$ with time. We can set $\alpha = 0.01$ d $^{-1}$.
 ```{r}
 s0 <- 100
-alpha <- 0.01
+alpha <- 1
 ntsteps <- 500
 s_t <- rep(NA, ntsteps)
 t_t <- rep(NA, ntsteps)
 s_t[1] <- s0 
+
 for (idx in 1:(ntsteps-1)){
-  t_t[idx] <- alpha * s_t[idx]
+  t_t[idx] <- alpha * s_t[idx] / s0
   s_t[idx + 1] <- s_t[idx] - t_t[idx]
 }
+
 df_lin <- tibble( time = 1:ntsteps, soilm = s_t, transp = t_t ) 
+
 df_lin %>% 
   ggplot(aes(time, soilm)) + 
   geom_line()
@@ -55,6 +58,43 @@ df_lin %>%
   labs(x=expression(integral(ET))) +
   geom_line()
 ```
+
+### Effect of rooting zone water storage capacity
+
+Let's compare the same relationship as above but with two different $S_0$.
+```{r}
+s0 <- 50
+s_t[1] <- s0 
+for (idx in 1:(ntsteps-1)){
+  t_t[idx] <- alpha * s_t[idx] / s0
+  s_t[idx + 1] <- s_t[idx] - t_t[idx]
+}
+
+
+df_lin_deep <- df_lin %>% 
+  mutate(rzwsc = "deep", cwd = cumsum(transp))
+
+df_lin_shallow <- tibble(time = 1:ntsteps, soilm= s_t, transp = t_t) %>% 
+  mutate(rzwsc = "shallow", cwd = cumsum(transp))
+
+df_lin <- bind_rows(df_lin_deep, df_lin_shallow)
+
+df_lin %>% 
+  ggplot(aes(x = time, y = soilm, color = rzwsc)) + 
+  geom_line()
+
+df_lin %>% 
+  tidyr::drop_na() %>% 
+  ggplot(aes(time, transp, color = rzwsc)) + 
+  geom_line()
+
+df_lin %>%
+  tidyr::drop_na() %>% 
+  ggplot(aes(x = cwd, y = transp, color = rzwsc)) +
+  labs(x=expression(integral(ET))) +
+  geom_line()
+```
+
 
 The question is: How does VPD affect the ET decline?
 
