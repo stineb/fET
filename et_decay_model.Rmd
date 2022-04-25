@@ -77,18 +77,18 @@ df_lin_deep <- df_lin %>%
 df_lin_shallow <- tibble(time = 1:ntsteps, soilm= s_t, transp = t_t) %>% 
   mutate(rzwsc = "shallow", cwd = cumsum(transp))
 
-df_lin <- bind_rows(df_lin_deep, df_lin_shallow)
+df_lin2 <- bind_rows(df_lin_deep, df_lin_shallow)
 
-df_lin %>% 
+df_lin2 %>% 
   ggplot(aes(x = time, y = soilm, color = rzwsc)) + 
   geom_line()
 
-df_lin %>% 
+df_lin2 %>% 
   tidyr::drop_na() %>% 
   ggplot(aes(time, transp, color = rzwsc)) + 
   geom_line()
 
-df_lin %>%
+df_lin2 %>%
   tidyr::drop_na() %>% 
   ggplot(aes(x = cwd, y = transp, color = rzwsc)) +
   labs(x=expression(integral(ET))) +
@@ -111,25 +111,32 @@ for (idx in 1:(ntsteps-1)){
 
 
 df_lin_conservative <- df_lin %>% 
-  mutate(str = "conservative", cwd = cumsum(transp))
+  mutate(fet = transp / transp[1]) %>% 
+  mutate(strategy = "conservative", cwd = cumsum(transp))
 
 df_lin_exploit <- tibble(time = 1:ntsteps, soilm = s_t, transp = t_t) %>% 
-  mutate(str = "exploit", cwd = cumsum(transp))
+  mutate(fet = transp / transp[1]) %>% 
+  mutate(strategy = "exploit", cwd = cumsum(transp))
 
-df_lin <- bind_rows(df_lin_conservative, df_lin_exploit)
+df_lin3 <- bind_rows(df_lin_conservative, df_lin_exploit)
 
-df_lin %>% 
-  ggplot(aes(x = time, y = soilm, color = str)) + 
+df_lin3 %>% 
+  ggplot(aes(x = time, y = soilm, color = strategy)) + 
   geom_line()
 
-df_lin %>% 
+df_lin3 %>% 
   tidyr::drop_na() %>% 
-  ggplot(aes(time, transp, color = str)) + 
+  ggplot(aes(time, transp, color = strategy)) + 
   geom_line()
 
-df_lin %>%
+df_lin3 %>% 
   tidyr::drop_na() %>% 
-  ggplot(aes(x = cwd, y = transp, color = str)) +
+  ggplot(aes(time, fet, color = strategy)) + 
+  geom_line()
+
+df_lin3 %>%
+  tidyr::drop_na() %>% 
+  ggplot(aes(x = cwd, y = fet, color = strategy)) +
   labs(x=expression(integral(ET))) +
   geom_line()
 ```
