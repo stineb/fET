@@ -100,7 +100,7 @@ The question is: How does VPD affect the ET decline?
 
 ## Effect of maximum conductance
 
-Let's compare the same relationship as above but with two different $S_0$.
+Let's compare the same relationships of two points with different initial (water-unlimited) conductances and transpiration, and identical $S_0$.
 ```{r}
 s0 <- 100
 s_t[1] <- s0 
