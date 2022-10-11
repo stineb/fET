@@ -324,6 +324,75 @@ df_lin %>%
   geom_line()
 ```
 
+## Different stomatal strategy and Gs as a non-linear function of soil moisture
+
+Instead of a linear response of $G_s$ to $S$, we can assume a sigmoidal response that looks (somewhat more realistically) like this:
+```{r}
+sigm <- function(x){1/(1+exp(-(x/2.5-2.5)))}
+df_sigm <- tibble(soilm=0:100) %>% 
+  rowwise() %>% 
+  mutate(gs = sigm(soilm))
+df_sigm %>% 
+  ggplot(aes(soilm, gs)) +
+  geom_line()
+```
+
+Now, let's look at the evolution of soil moisture and transpiration during dry-down events. First, with constant VPD.
+```{r}
+## exploitative
+s0 <- 100
+alpha <- 1
+ntsteps <- 500
+d_t <- rep(1, ntsteps)
+s_t <- rep(NA, ntsteps)
+t_t <- rep(NA, ntsteps)
+s_t[1] <- s0 
+
+for (idx in 1:(ntsteps-1)){
+  t_t[idx] <- alpha * sigm(s_t[idx]) * d_t[idx]
+  s_t[idx + 1] <- s_t[idx] - t_t[idx]
+}
+
+df_lin_exploitative <- tibble( time = 1:ntsteps, soilm = s_t, transp = t_t ) %>% 
+  mutate(stomatal = "exploitative", cwd = cumsum(transp),
+         fet = transp/transp[1])
+
+## conservative
+alpha <- 0.5
+s_t[1] <- s0 
+for (idx in 1:(ntsteps-1)){
+  t_t[idx] <- alpha * sigm(s_t[idx]) * d_t[idx]
+  s_t[idx + 1] <- s_t[idx] - t_t[idx]
+}
+
+df_lin_conservative <- tibble(time = 1:ntsteps, soilm= s_t, transp = t_t) %>% 
+  mutate(stomatal = "conservative", cwd = cumsum(transp),
+         fet = transp/transp[1])
+
+df_lin <- bind_rows(df_lin_exploitative, df_lin_conservative)
+
+df_lin %>% 
+  ggplot(aes(x = time, y = soilm, color = stomatal)) + 
+  geom_line()
+
+df_lin %>% 
+  tidyr::drop_na() %>% 
+  ggplot(aes(time, transp, color = stomatal)) + 
+  geom_line()
+
+df_lin %>%
+  tidyr::drop_na() %>% 
+  ggplot(aes(x = cwd, y = transp, color = stomatal)) +
+  labs(x=expression(integral(ET))) +
+  geom_line()
+
+df_lin %>%
+  tidyr::drop_na() %>% 
+  ggplot(aes(x = cwd, y = fet, color = stomatal)) +
+  labs(x = expression(integral(ET)), y = "fET") +
+  geom_line()
+```
+
 
 <!-- ```{r} -->
 <!-- beta <- 1e-5 -->
